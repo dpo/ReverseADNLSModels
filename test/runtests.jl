@@ -10,9 +10,7 @@ using NLPModels, ReverseADNLSModels
   x0 = [-1.2; 1.0]
   nvar = 2
   nequ = 2
-
   model = ReverseADNLSModel(F!, nequ, x0, name = "bogus NLS")
-  @test typeof(model) == ReverseADNLSModel{Float64, Vector{Float64}, typeof(F!)}
 
   Fx = similar(x0)
   residual!(model, x0, Fx)
