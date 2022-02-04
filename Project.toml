@@ -9,7 +9,7 @@ NLPModels = "a4795742-8479-5a88-8948-cc11e1c8c1a6"
 ReverseDiff = "37e2e3b7-166d-5795-8a7a-e32c996b4267"
 
 [compat]
-NLPModels = "0.18"
+NLPModels = "0.15, 0.16, 0.17, 0.18"
 ReverseDiff = "1.12"
 
 [extras]
