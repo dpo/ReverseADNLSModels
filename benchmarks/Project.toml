@@ -1,0 +1,6 @@
+[deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+BundleAdjustmentModels = "0bf3e898-7c79-4b38-9ca6-2d9cc6573905"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+NLPModels = "a4795742-8479-5a88-8948-cc11e1c8c1a6"
+ReverseADNLSModels = "1cd4cf3a-ab95-428b-afc2-fde2104d3d9d"
