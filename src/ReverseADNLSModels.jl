@@ -1,11 +1,32 @@
 module ReverseADNLSModels
 using LinearAlgebra
-using ReverseDiff
+using ForwardDiff, ReverseDiff
 using NLPModels
 
 export ReverseADNLSModel
 
 abstract type ADBackend end
+
+# ForwardDiff.derivative!(Jv, ϕ!, Fx, zero(eltype(x)))
+struct ForwardDiffAD{F, T} <: ADBackend where {F <: Function, T <: Real}
+  ϕ!::F
+  tmp_out::Vector{T}
+end
+
+function ForwardDiffAD(r!::R, T::DataType, nequ::Int) where R <: Function
+  ϕ!(out, t, x, v) = begin
+    r!(out, x + t * v)  # no idea how to preallocate a vector for x + t * v ???
+    out
+  end
+  # can't figure out how to do jtprod without allocating...
+  tmp_out = Vector{T}(undef, nequ)
+  ForwardDiffAD{typeof(ϕ!), T}(ϕ!, tmp_out)
+end
+
+function jprod_residual!(Jv, fd::ForwardDiffAD{F,T}, x, v, args...) where {F <: Function, T <: Real}
+  ForwardDiff.derivative!(Jv, (out, t) -> fd.ϕ!(out, t, x, v), fd.tmp_out, 0)
+  Jv
+end
 
 struct ReverseDiffAD{T, F1, F2} <: ADBackend where {T, F1 <: Function, F2 <: Function}
   ϕ!::F1
@@ -58,27 +79,31 @@ with a smooth residual Jacobian-vector products computed via reverse-mode AD.
 
 * `r! :: R <: Function`: a function such that `r!(y, x)` stores the residual at `x` in `y`.
 """
-mutable struct ReverseADNLSModel{T, S, R, AD} <: AbstractNLSModel{T, S}
+mutable struct ReverseADNLSModel{T, S, R, AD1, AD2} <: AbstractNLSModel{T, S}
   meta::NLPModelMeta{T, S}
   nls_meta::NLSMeta{T, S}
   counters::NLSCounters
 
   resid!::R
   _tmp_output::S
-  rd::AD
+  fd::AD1
+  rd::AD2
+  adbackends::Dict{Symbol, ADBackend}
 
-  function ReverseADNLSModel{T, S, R, AD}(
+  function ReverseADNLSModel{T, S, R, AD1, AD2}(
     r!::R,
     nequ::Int,
     x::S,
-    rd::AD;
+    fd::AD1,
+    rd::AD2;
     name::AbstractString = "reverse AD NLS model",
-  ) where {T <: Real, S, R <: Function, AD <: ADBackend}
+  ) where {T <: Real, S, R <: Function, AD1 <: ADBackend, AD2 <: ADBackend}
     nvar = length(x)
     meta = NLPModelMeta(nvar, x0 = x, name = name)
     nls_meta = NLSMeta{T, S}(nequ, nvar, x0 = x)
     tmp_output = S(undef, nequ)
-    return new{T, S, R, AD}(meta, nls_meta, NLSCounters(), r!, tmp_output, rd)
+    adbackends = Dict{Symbol, ADBackend}(:jprod_residual! => fd, :jtprod_residual! => rd)
+    return new{T, S, R, AD1, AD2}(meta, nls_meta, NLSCounters(), r!, tmp_output, fd, rd, adbackends)
   end
 end
 
@@ -87,12 +112,14 @@ function ReverseADNLSModel(r!, nequ::Int, x::S; kwargs...) where {S}
 
   T = eltype(S)
   nvar = length(x)
+  fd = ForwardDiffAD(r!, T, nequ)
   rd = ReverseDiffAD(r!, T, nvar, nequ)
 
-  ReverseADNLSModel{T, S, typeof(r!), typeof(rd)}(
+  ReverseADNLSModel{T, S, typeof(r!), typeof(fd), typeof(rd)}(
     r!,
     nequ,
     x,
+    fd,
     rd;
     kwargs...,
   )
@@ -115,7 +142,7 @@ function NLPModels.jprod_residual!(
   NLPModels.@lencheck nls.meta.nvar x v
   NLPModels.@lencheck nls.nls_meta.nequ Jv
   increment!(nls, :neval_jprod_residual)
-  jprod_residual!(Jv, nls.rd, x, v, nls._tmp_output)
+  jprod_residual!(Jv, nls.adbackends[:jprod_residual!], x, v, nls._tmp_output)
 end
 
 function NLPModels.jtprod_residual!(
@@ -127,7 +154,7 @@ function NLPModels.jtprod_residual!(
   NLPModels.@lencheck nls.meta.nvar x Jtv
   NLPModels.@lencheck nls.nls_meta.nequ v
   increment!(nls, :neval_jtprod_residual)
-  jtprod_residual!(Jtv, nls.rd, x, v)
+  jtprod_residual!(Jtv, nls.adbackends[:jtprod_residual!], x, v)
 end
 
 end # module
