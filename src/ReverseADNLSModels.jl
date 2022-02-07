@@ -1,30 +1,26 @@
 module ReverseADNLSModels
 using LinearAlgebra
-using ForwardDiff, ReverseDiff
+using ForwardDiff, ReverseDiff, SparseDiffTools
 using NLPModels
 
 export ReverseADNLSModel
 
 abstract type ADBackend end
 
-# ForwardDiff.derivative!(Jv, ϕ!, Fx, zero(eltype(x)))
-struct ForwardDiffAD{F, T} <: ADBackend where {F <: Function, T <: Real}
-  ϕ!::F
-  tmp_out::Vector{T}
+struct ForwardDiffAD{T, F} <: ADBackend where {T, F <: Function}
+  r!::F
+  tmp_in::Vector{SparseDiffTools.Dual{ForwardDiff.Tag{SparseDiffTools.DeivVecTag, T}, T, 1}}
+  tmp_out::Vector{SparseDiffTools.Dual{ForwardDiff.Tag{SparseDiffTools.DeivVecTag, T}, T, 1}}
 end
 
-function ForwardDiffAD(r!::R, T::DataType, nequ::Int) where R <: Function
-  ϕ!(out, t, x, v) = begin
-    r!(out, x + t * v)  # no idea how to preallocate a vector for x + t * v ???
-    out
-  end
-  # can't figure out how to do jtprod without allocating...
-  tmp_out = Vector{T}(undef, nequ)
-  ForwardDiffAD{typeof(ϕ!), T}(ϕ!, tmp_out)
+function ForwardDiffAD(r!::F, T::DataType, nvar::Int, nequ::Int) where F <: Function
+  tmp_in = Vector{SparseDiffTools.Dual{ForwardDiff.Tag{SparseDiffTools.DeivVecTag, T}, T, 1}}(undef, nvar)
+  tmp_out = Vector{SparseDiffTools.Dual{ForwardDiff.Tag{SparseDiffTools.DeivVecTag, T}, T, 1}}(undef, nequ)
+  ForwardDiffAD{T, F}(r!, tmp_in, tmp_out)
 end
 
-function jprod_residual!(Jv, fd::ForwardDiffAD{F,T}, x, v, args...) where {F <: Function, T <: Real}
-  ForwardDiff.derivative!(Jv, (out, t) -> fd.ϕ!(out, t, x, v), fd.tmp_out, 0)
+function jprod_residual!(Jv::AbstractVector{T}, fd::ForwardDiffAD{T}, x::AbstractVector{T}, v::AbstractVector{T}, args...) where T
+  SparseDiffTools.auto_jacvec!(Jv, fd.r!, x, v, fd.tmp_in, fd.tmp_out)
   Jv
 end
 
@@ -112,7 +108,7 @@ function ReverseADNLSModel(r!, nequ::Int, x::S; kwargs...) where {S}
 
   T = eltype(S)
   nvar = length(x)
-  fd = ForwardDiffAD(r!, T, nequ)
+  fd = ForwardDiffAD(r!, T, nvar, nequ)
   rd = ReverseDiffAD(r!, T, nvar, nequ)
 
   ReverseADNLSModel{T, S, typeof(r!), typeof(fd), typeof(rd)}(
