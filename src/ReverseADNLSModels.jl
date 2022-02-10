@@ -13,7 +13,7 @@ struct ForwardDiffAD{T, F} <: ADBackend where {T, F <: Function}
   tmp_out::Vector{SparseDiffTools.Dual{ForwardDiff.Tag{SparseDiffTools.DeivVecTag, T}, T, 1}}
 end
 
-function ForwardDiffAD(r!::F, T::DataType, nvar::Int, nequ::Int) where F <: Function
+function ForwardDiffAD(r!::F, T::DataType, nvar::Int, nequ::Int) where {F <: Function}
   tmp_in = Vector{SparseDiffTools.Dual{ForwardDiff.Tag{SparseDiffTools.DeivVecTag, T}, T, 1}}(undef, nvar)
   tmp_out = Vector{SparseDiffTools.Dual{ForwardDiff.Tag{SparseDiffTools.DeivVecTag, T}, T, 1}}(undef, nequ)
   ForwardDiffAD{T, F}(r!, tmp_in, tmp_out)
@@ -32,7 +32,7 @@ struct ReverseDiffAD{T, F1, F2} <: ADBackend where {T, F1 <: Function, F2 <: Fun
   z::Vector{T}
 end
 
-function ReverseDiffAD(r!::R, T::DataType, nvar::Int, nequ::Int) where R <: Function
+function ReverseDiffAD(r!::F, T::DataType, nvar::Int, nequ::Int) where {F <: Function}
   # define ReverseDiff AD backend
   # ... auxiliary function for J(x) * v
   # ... J(x) * v is the derivative at t = 0 of t ↦ r(x + tv)
@@ -62,6 +62,35 @@ end
 
 function jtprod_residual!(Jtv, rd::ReverseDiffAD{T, F1, F2}, x, v) where {T, F1 <: Function, F2 <: Function}
   ReverseDiff.gradient!(Jtv, u -> rd.ψ(u, v, rd._tmp_output), x)
+  Jtv
+end
+
+struct ReverseDiffADTape{T, F2, GC, GT} <: ADBackend where {T, F2 <: Function, GC, GT}
+  # ϕ!::F1
+  ψ::F2
+  gcfg::GC  # gradient config
+  gtape::GT  # compiled gradient tape
+  _tmp_output::Vector{ReverseDiff.TrackedReal{T, T, Nothing}}
+  _rval::Vector{T}  # temporary storage for jtprod
+end
+
+function ReverseDiffADTape(r!::F, x0::AbstractArray{T}, nequ::Int) where {T, F <: Function}
+  _tmp_output_rd = Vector{ReverseDiff.TrackedReal{T, T, Nothing}}(undef, nequ)
+  _ψ(x, u, tmp_out) = begin
+    # here x is a vector of ReverseDiff.TrackedReal
+    r!(tmp_out, x)
+    dot(tmp_out, u)
+  end
+  ψ = (x, u) -> _ψ(x, u, _tmp_output_rd)
+  u = similar(x0, nequ)  # just for GradientConfig
+  gcfg = ReverseDiff.GradientConfig((x0, u))
+  gtape = ReverseDiff.compile(ReverseDiff.GradientTape(ψ, (x0, u), gcfg))
+  rval = similar(x0, nequ)  # temporary storage for jtprod
+  ReverseDiffADTape{T, typeof(ψ), typeof(gcfg), typeof(gtape)}(ψ, gcfg, gtape, _tmp_output_rd, rval)
+end
+
+function jtprod_residual!(Jtv, rd::ReverseDiffADTape{T, F2, GC, GT}, x, v) where {T, F2 <: Function, GC, GT}
+  ReverseDiff.gradient!((Jtv, rd._rval), rd.gtape, (x, v))
   Jtv
 end
 
@@ -104,12 +133,14 @@ mutable struct ReverseADNLSModel{T, S, R, AD1, AD2} <: AbstractNLSModel{T, S}
 end
 
 # convenience constructor
-function ReverseADNLSModel(r!, nequ::Int, x::S; kwargs...) where {S}
+# TODO: Explain why r_fwd! and r_rev! might differ from r!
+function ReverseADNLSModel(r!, nequ::Int, x::S; r_fwd! = r!, r_rev! = r!, kwargs...) where {S}
 
   T = eltype(S)
   nvar = length(x)
-  fd = ForwardDiffAD(r!, T, nvar, nequ)
-  rd = ReverseDiffAD(r!, T, nvar, nequ)
+  fd = ForwardDiffAD(r_fwd!, T, nvar, nequ)
+  # rd = ReverseDiffAD(r_rev!, T, nvar, nequ)
+  rd = ReverseDiffADTape(r_rev!, x, nequ)
 
   ReverseADNLSModel{T, S, typeof(r!), typeof(fd), typeof(rd)}(
     r!,
