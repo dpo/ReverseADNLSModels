@@ -12,9 +12,9 @@ SparseDiffTools = "47a9eef4-7e08-11e9-0b38-333d64bd3804"
 
 [compat]
 ForwardDiff = "0.10"
-NLPModels = "0.15, 0.16, 0.17, 0.18"
-ReverseDiff = "1.12"
-SparseDiffTools = "1.20"
+NLPModels = "0.21"
+ReverseDiff = "1.15"
+SparseDiffTools = "2.19"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
