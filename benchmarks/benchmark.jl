@@ -63,7 +63,7 @@ display(b_jtprod)
 nls = BundleAdjustmentModel(name)
 meta_nls = nls_meta(nls)
 
-function F!(Fx, x)
+function F!(Fx, x, nls = nls)
   residual!(nls, x, Fx)
 end
 
