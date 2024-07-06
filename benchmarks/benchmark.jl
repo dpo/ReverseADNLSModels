@@ -6,7 +6,7 @@ using ReverseDiff
 using SparseDiffTools
 
 using BundleAdjustmentModels
-using NLPModels
+using ADNLPModels, NLPModels
 using ReverseADNLSModels
 
 df = problems_df()
@@ -59,3 +59,24 @@ u = fill!(similar(Jv), 1)
 Jtu = similar(x0)
 b_jtprod = @benchmark jtprod_residual!($rd_bamodel, $x0, $u, $Jtu)
 display(b_jtprod)
+
+nls = BundleAdjustmentModel(name)
+meta_nls = nls_meta(nls)
+
+function F!(Fx, x)
+  residual!(nls, x, Fx)
+end
+
+adnls = ADNLSModel!(F!, nls.meta.x0, meta_nls.nequ, nls.meta.lvar, nls.meta.uvar, backend = :optimized,
+                                                                                  hessian_backend = ADNLPModels.EmptyADbackend,
+                                                                                  hessian_residual_backend = ADNLPModels.EmptyADbackend,
+                                                                                  jacobian_backend = ADNLPModels.EmptyADbackend,
+                                                                                  jacobian_residual_backend = ADNLPModels.EmptyADbackend,)
+
+@info "benchmarking ADNLPModels jprod"
+b_jprod_adnlp = @benchmark jprod_residual!($adnls, $x0, $v, $Jv)
+display(b_jprod_adnlp)
+
+@info "benchmarking ADNLPModels jtprod"
+b_jtprod_adnlp = @benchmark jtprod_residual!($adnls, $x0, $u, $Jtu)
+display(b_jtprod_adnlp)
